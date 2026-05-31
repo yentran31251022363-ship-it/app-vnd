@@ -1,82 +1,48 @@
 import streamlit as st
 import tensorflow as tf
-from PIL import Image
 import numpy as np
+from PIL import Image
 
-# 1. Cấu hình trang Web
-st.set_page_config(page_title="Nhận Diện Món Ăn VN", page_icon="🍲", layout="centered")
+# Tiêu đề của ứng dụng
+st.title("Dự đoán Mệnh giá Tiền Việt Nam (VND Classifier)")
+st.write("Tải lên một bức ảnh tiền VNĐ để mô hình phân loại.")
 
-st.title("🍲 AI Nhận Diện Món Ăn Việt Nam")
-st.markdown("---")
-
-# 2. Tải bộ não AI (Phiên bản TFLite siêu nhẹ)
+# Hàm tải mô hình (sử dụng cache để không phải tải lại nhiều lần)
 @st.cache_resource
-def load_tflite_model():
-    # Đọc file .tflite
-    interpreter = tf.lite.Interpreter(model_path="Model_MonAn_VN.tflite")
-    interpreter.allocate_tensors()
-    return interpreter
+def load_model():
+    # Tải mô hình đã được huấn luyện
+    model = tf.keras.models.load_model('vnd_classifier.h5')
+    return model
 
-interpreter = load_tflite_model()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+model = load_model()
 
-# 3. Khai báo danh sách món ăn
-danh_sach_thu_muc = sorted([
-    'Banh_mi', 'Banh_xeo', 'Bun_bo_Hue', 'Bun_cha', 
-    'Bun_dau_mam_tom', 'Cha_gio', 'Com_tam', 
-    'Goi_cuon', 'Mi_Quang', 'Pho_bo'
-])
+# Khai báo các nhãn (Mệnh giá tiền) - Bạn hãy điều chỉnh lại thứ tự cho khớp với lúc training
+class_names = ['1000', '2000', '5000', '10000', '20000', '50000', '100000', '200000', '500000']
 
-tu_dien_mon = {
-    'Banh_mi': 'Bánh Mì Thịt', 'Banh_xeo': 'Bánh Xèo', 
-    'Bun_bo_Hue': 'Bún Bò Huế', 'Bun_cha': 'Bún Chả Hà Nội', 
-    'Bun_dau_mam_tom': 'Bún Đậu Mắm Tôm', 'Cha_gio': 'Chả Giò (Nem Rán)', 
-    'Com_tam': 'Cơm Tấm Sườn Bì Chả', 'Goi_cuon': 'Gỏi Cuốn', 
-    'Mi_Quang': 'Mì Quảng', 'Pho_bo': 'Phở Bò'
-}
+# Widget tải ảnh lên
+uploaded_file = st.file_uploader("Chọn một bức ảnh...", type=["jpg", "png", "jpeg"])
 
-# 4. Hàm dự đoán bằng TFLite
-def predict_tflite(image):
-    # Resize và chuẩn hóa ảnh
-    img_resized = image.resize((224, 224))
-    img_array = tf.keras.preprocessing.image.img_to_array(img_resized)
-    img_array = tf.expand_dims(img_array, 0)
+if uploaded_file is not None:
+    # Hiển thị ảnh
+    image = Image.open(uploaded_file)
+    st.image(image, caption='Ảnh đã tải lên', use_container_width=True)
     
-    # Bơm ảnh vào mô hình TFLite
-    interpreter.set_tensor(input_details[0]['index'], img_array)
-    interpreter.invoke() # Chạy dự đoán
+    st.write("Đang phân loại...")
     
-    # Lấy kết quả
-    predictions = interpreter.get_tensor(output_details[0]['index'])
-    score = tf.nn.softmax(predictions[0])
+    # Tiền xử lý ảnh (Lưu ý: Thay đổi (224, 224) thành kích thước đầu vào mà mô hình của bạn yêu cầu)
+    img_resized = image.resize((224, 224)) 
+    img_array = np.array(img_resized)
     
-    thu_muc_du_doan = danh_sach_thu_muc[np.argmax(score)]
-    ten_mon = tu_dien_mon[thu_muc_du_doan]
-    do_tu_tin = 100 * np.max(score)
+    # Chuẩn hóa ảnh nếu lúc train bạn có chia cho 255
+    # img_array = img_array / 255.0 
     
-    return ten_mon, do_tu_tin
-
-# 5. Thiết kế Giao diện Người dùng
-tab1, tab2 = st.tabs(["📁 Tải ảnh lên", "📸 Chụp Camera"])
-
-with tab1:
-    uploaded_file = st.file_uploader("Chọn một bức ảnh món ăn...", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption='Ảnh bạn vừa tải lên', use_container_width=True)
-        
-        if st.button("Phân tích ảnh này 🚀"):
-            with st.spinner('AI đang nếm thử...'):
-                ten_mon, do_tu_tin = predict_tflite(image)
-                st.success(f"🎯 KẾT QUẢ: Đây là món **{ten_mon.upper()}**")
-                st.info(f"Độ tự tin: **{do_tu_tin:.2f}%**")
-
-with tab2:
-    camera_file = st.camera_input("Đưa món ăn ra trước Camera")
-    if camera_file is not None:
-        image = Image.open(camera_file)
-        with st.spinner('AI đang soi camera...'):
-            ten_mon, do_tu_tin = predict_tflite(image)
-            st.success(f"🎯 KẾT QUẢ: Đây là món **{ten_mon.upper()}**")
-            st.info(f"Độ tự tin: **{do_tu_tin:.2f}%**")
+    img_array = np.expand_dims(img_array, axis=0)
+    
+    # Chạy dự đoán
+    predictions = model.predict(img_array)
+    predicted_index = np.argmax(predictions[0])
+    confidence = np.max(predictions[0])
+    
+    # Hiển thị kết quả
+    st.success(f"Dự đoán: {class_names[predicted_index]} VNĐ")
+    st.info(f"Độ tin cậy: {confidence * 100:.2f}%")
